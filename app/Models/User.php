@@ -41,7 +41,46 @@ class User extends Authenticatable
         'address',
     ];
 
-    protected $appends = ['photo', 'photo_url'];
+    protected $appends = ['photo', 'photo_url', 'permissions', 'role_display_name'];
+
+    public function roleRecord()
+    {
+        return $this->belongsTo(Role::class, 'role', 'name');
+    }
+
+    public function getPermissionsAttribute()
+    {
+        if ($this->role === 'super_admin') {
+            return Role::getAllPermissionsList();
+        }
+
+        $role = Role::where('name', $this->role)->first();
+        if ($role && is_array($role->permissions)) {
+            return $role->permissions;
+        }
+
+        if ($this->role === 'admin') {
+            return Role::getAllPermissionsList();
+        }
+
+        return [
+            'dashboard' => ['view'],
+            'products' => ['view'],
+            'transfer' => ['view', 'tambah'],
+            'history' => ['view'],
+            'borrow-status' => ['view'],
+        ];
+    }
+
+    public function getRoleDisplayNameAttribute()
+    {
+        if ($this->role === 'super_admin') return 'Super Admin';
+        if ($this->role === 'admin') return 'Admin';
+        if ($this->role === 'user') return 'User';
+        
+        $role = Role::where('name', $this->role)->first();
+        return $role?->display_name ?? ucfirst(str_replace('_', ' ', $this->role ?? 'User'));
+    }
 
     public function getPhotoAttribute()
     {
@@ -66,9 +105,8 @@ class User extends Authenticatable
     {
         static::creating(function ($user) {
             if (empty($user->employee_id)) {
-                $maxId = static::max('employee_id');
-                // Mengambil angka terakhir, tambah 1, lalu pad dengan nol di depan (contoh: 00001)
-                $nextId = $maxId ? (int)$maxId + 1 : 1;
+                $maxNum = static::whereRaw("employee_id REGEXP '^[0-9]+$'")->max(\Illuminate\Support\Facades\DB::raw('CAST(employee_id AS UNSIGNED)'));
+                $nextId = $maxNum ? (int)$maxNum + 1 : 1;
                 $user->employee_id = str_pad($nextId, 5, '0', STR_PAD_LEFT);
             }
         });

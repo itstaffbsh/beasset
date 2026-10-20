@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use App\Services\ImageOptimizerService;
 
 class UserController extends Controller
@@ -63,7 +64,7 @@ class UserController extends Controller
             'email'          => 'required|email|unique:users',
             'email_bsh'      => 'nullable|email',
             'personal_email' => 'nullable|email',
-            'role'           => 'required|in:user,admin,super_admin',
+            'role'           => 'required|string|max:100',
             'office_id'      => 'required|exists:offices,id',
             'department_id'  => 'nullable|exists:departments,id',
             'job_position'   => 'nullable|string|max:255',
@@ -105,13 +106,18 @@ class UserController extends Controller
 
     public function update(Request $request, User $user)
     {
+        $employeeIdRules = ['nullable', 'string', 'max:255'];
+        if ($request->filled('employee_id') && $request->employee_id !== $user->employee_id) {
+            $employeeIdRules[] = Rule::unique('users', 'employee_id')->ignore($user->id);
+        }
+
         $request->validate([
-            'employee_id'    => 'nullable|string|max:255|unique:users,employee_id,' . $user->id,
+            'employee_id'    => $employeeIdRules,
             'name'           => 'required|string|max:255',
-            'email'          => 'required|email|unique:users,email,' . $user->id,
+            'email'          => ['required', 'email', Rule::unique('users', 'email')->ignore($user->id)],
             'email_bsh'      => 'nullable|email',
             'personal_email' => 'nullable|email',
-            'role'           => 'required|in:user,admin,super_admin',
+            'role'           => 'required|string|max:100',
             'office_id'      => 'required|exists:offices,id',
             'department_id'  => 'nullable|exists:departments,id',
             'job_position'   => 'nullable|string|max:255',

@@ -14,6 +14,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\EwtrToolCategoryController;
 use App\Http\Controllers\EwtrController;
+use App\Http\Controllers\RoleController;
 
 // Autentikasi
 Route::post('/login', [AuthController::class, 'login']);
@@ -35,8 +36,6 @@ Route::middleware('auth:sanctum')->group(function () {
     
     // Super Admin Routes
     Route::middleware('role:super_admin')->group(function () {
-        Route::post('/users/{user}/make-admin', [UserController::class, 'makeAdmin']);
-        Route::get('/users/{user}/details', [UserController::class, 'details']);
         Route::post('/users/{user}/resign', [UserController::class, 'resign']);
         Route::delete('/users/{user}', [UserController::class, 'destroy']);
         
@@ -47,11 +46,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Admin & Super Admin Routes
     Route::middleware('role:super_admin,admin')->group(function () {
+        Route::get('/users/{user}/details', [UserController::class, 'details']);
         Route::apiResource('users', UserController::class)->except(['destroy', 'show']);
         Route::get('/users-export', [UserController::class, 'export']);
         Route::get('/users-export-pdf', [UserController::class, 'exportPdf']);
         Route::post('/users-import', [UserController::class, 'import']);
         Route::post('/users/{user}/reset-password', [UserController::class, 'resetPassword']);
+        Route::post('/users/{user}/make-admin', [UserController::class, 'makeAdmin']);
+
+        // Role Management Routes
+        Route::get('/roles-menus', [RoleController::class, 'menus']);
+        Route::apiResource('roles', RoleController::class);
 
         Route::apiResource('offices', OfficeController::class);
         Route::apiResource('classifications', ClassificationController::class);
@@ -87,5 +92,3 @@ Route::middleware('auth:sanctum')->group(function () {
 
 // Publik Scan API
 Route::get('/scan/{token}', [ScanController::class, 'apiShow']);
-
-
