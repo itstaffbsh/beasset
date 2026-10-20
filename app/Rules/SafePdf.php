@@ -42,6 +42,7 @@ class SafePdf implements ValidationRule
             'applications/vnd.pdf',
             'text/pdf',
             'text/x-pdf',
+            'application/octet-stream',
         ];
         if (!in_array($mime, $allowedMimes)) {
             $fail('Tipe file bukan merupakan dokumen PDF yang sah.');
@@ -105,9 +106,71 @@ class SafePdf implements ValidationRule
                 $fail('Dokumen PDF tidak memiliki halaman yang valid.');
                 return;
             }
+        } catch (\setasign\Fpdi\PdfParser\CrossReference\CrossReferenceException $e) {
+            // FPDI free parser tidak mendukung kompresi cross-reference stream (/ObjStm atau /XRef) pada PDF 1.5+.
+            // Ini adalah fitur kompresi standar dokumen PDF modern, verifikasi integritas struktur dokumen.
+            if (!$this->isValidPdfStructure($realPath, $content)) {
+                $fail('Dokumen PDF rusak atau tidak sesuai spesifikasi dokumen standar.');
+                return;
+            }
         } catch (\Throwable $e) {
-            $fail('Dokumen PDF rusak, dipalsukan, atau tidak sesuai spesifikasi dokumen standar.');
-            return;
+            $msg = $e->getMessage();
+            if (
+                str_contains($msg, 'compression technique which is not supported by the free parser') ||
+                str_contains($msg, 'PDF version') ||
+                str_contains($msg, 'filter') ||
+                str_contains($msg, 'parser')
+            ) {
+                if (!$this->isValidPdfStructure($realPath, $content)) {
+                    $fail('Dokumen PDF rusak atau tidak sesuai spesifikasi dokumen standar.');
+                    return;
+                }
+            } else {
+                $fail('Dokumen PDF rusak, dipalsukan, atau tidak sesuai spesifikasi dokumen standar.');
+                return;
+            }
         }
+    }
+
+    /**
+     * Memeriksa integritas struktur dasar dokumen PDF jika tidak dapat dibaca oleh FPDI free parser
+     * karena menggunakan kompresi modern cross-reference stream (/ObjStm atau /XRef).
+     */
+    private function isValidPdfStructure(string $realPath, string $content): bool
+    {
+        if (filesize($realPath) < 32 || strlen($content) < 32) {
+            return false;
+        }
+
+        // 1. Header: harus ada %PDF- dalam 1024 bytes pertama
+        $headerChunk = substr($content, 0, 1024);
+        if (!str_contains($headerChunk, '%PDF-')) {
+            return false;
+        }
+
+        // 2. Trailer: harus ada %%EOF pada bagian akhir dokumen (4096 bytes terakhir)
+        $tailChunk = substr($content, -4096);
+        if (!str_contains($tailChunk, '%%EOF')) {
+            return false;
+        }
+
+        // 3. Harus memiliki tabel atau stream referensi silang (startxref atau /XRef)
+        if (!str_contains($tailChunk, 'startxref') && !preg_match('/\/XRef\b/i', $content)) {
+            return false;
+        }
+
+        // 4. Harus memuat katalog atau pohon halaman dokumen
+        $hasCatalog = preg_match('/\/Type\s*\/Catalog|\/Root\b/i', $content);
+        $hasPages = preg_match('/\/Type\s*\/Pages|\/Pages\b/i', $content);
+        if (!$hasCatalog && !$hasPages) {
+            return false;
+        }
+
+        // 5. Harus memiliki objek PDF (obj ... endobj atau stream objek)
+        if (!str_contains($content, 'obj')) {
+            return false;
+        }
+
+        return true;
     }
 }
