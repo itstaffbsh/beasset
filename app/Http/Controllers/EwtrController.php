@@ -138,6 +138,7 @@ class EwtrController extends Controller
 
     public function show(Ewtr $ewtr)
     {
+        $this->ensurePdfStamped($ewtr);
         $ewtr->load(['items', 'creator']);
         return response()->json($ewtr);
     }
@@ -286,38 +287,103 @@ class EwtrController extends Controller
     }
 
     /**
+     * Pastikan file PDF sudah memiliki cap keterangan di Review & Comments.
+     * Jika file stamped belum ada atau masih file mentah (raw), lakukan stamping otomatis.
+     */
+    public function ensurePdfStamped(Ewtr $ewtr): void
+    {
+        $keterangan = trim($ewtr->keterangan ?? '');
+        if ($keterangan === '' || empty($ewtr->pdf_path)) {
+            return;
+        }
+
+        $stampedFullPath = Storage::disk('public')->path($ewtr->pdf_path);
+        $rawRelPath = str_replace('.pdf', '_raw.pdf', $ewtr->pdf_path);
+        $rawFullPath = Storage::disk('public')->path($rawRelPath);
+
+        if (file_exists($rawFullPath)) {
+            $rawSize = filesize($rawFullPath);
+            $stampedSize = file_exists($stampedFullPath) ? filesize($stampedFullPath) : 0;
+
+            // Jika file stamped belum ada atau ukurannya sama persis dengan raw (belum distamp)
+            if (!file_exists($stampedFullPath) || $stampedSize <= $rawSize) {
+                $this->stampPdfWithKeterangan($rawFullPath, $stampedFullPath, $keterangan);
+            }
+        }
+    }
+
+    /**
      * Resolve working python binary executable (Windows & Linux compatible)
      */
-    protected function getPythonBinary(): string
+    public function getPythonBinary(): string
     {
-        $candidates = [
-            'C:\\Python314\\python.exe',
-            'C:\\Python313\\python.exe',
-            'C:\\Python312\\python.exe',
-            'C:\\Python311\\python.exe',
-            'C:\\Python310\\python.exe',
+        // 1. Cek variabel PYTHON_BINARY dari file .env jika dikonfigurasi
+        if ($envPython = env('PYTHON_BINARY')) {
+            if (file_exists($envPython) || (DIRECTORY_SEPARATOR === '/' && is_executable($envPython))) {
+                return $envPython;
+            }
+        }
+
+        // 2. Windows environments
+        if (DIRECTORY_SEPARATOR === '\\') {
+            $windowsCandidates = [
+                'C:\\Python314\\python.exe',
+                'C:\\Python313\\python.exe',
+                'C:\\Python312\\python.exe',
+                'C:\\Python311\\python.exe',
+                'C:\\Python310\\python.exe',
+            ];
+
+            foreach ($windowsCandidates as $candidate) {
+                if (file_exists($candidate)) {
+                    return $candidate;
+                }
+            }
+
+            return 'python';
+        }
+
+        // 3. Linux / VPS Ubuntu environments (seperti api.balisuperhost.com)
+        $linuxCandidates = [
+            '/usr/bin/python3',
+            '/usr/local/bin/python3',
+            '/bin/python3',
+            'python3',
+            '/usr/bin/python',
+            '/usr/local/bin/python',
+            'python',
         ];
 
-        foreach ($candidates as $candidate) {
-            if (file_exists($candidate)) {
+        foreach ($linuxCandidates as $candidate) {
+            if (str_starts_with($candidate, '/') && file_exists($candidate) && is_executable($candidate)) {
                 return $candidate;
             }
         }
 
-        return 'python';
+        @exec('which python3 2>/dev/null', $output3, $code3);
+        if ($code3 === 0 && !empty($output3[0])) {
+            return trim($output3[0]);
+        }
+
+        @exec('which python 2>/dev/null', $output, $code);
+        if ($code === 0 && !empty($output[0])) {
+            return trim($output[0]);
+        }
+
+        return 'python3';
     }
 
     /**
      * Stamp keterangan onto EWTR PDF inside Review & Comments box in IT APPROVAL SECTION
      */
-    protected function stampPdfWithKeterangan(string $sourcePath, string $outputPath, ?string $keterangan): void
+    public function stampPdfWithKeterangan(string $sourcePath, string $outputPath, ?string $keterangan): bool
     {
         $keterangan = trim($keterangan ?? '');
         if ($keterangan === '') {
             if ($sourcePath !== $outputPath) {
                 copy($sourcePath, $outputPath);
             }
-            return;
+            return true;
         }
 
         $scriptPath = base_path('app/Scripts/stamp_ewtr_pdf.py');
@@ -326,21 +392,29 @@ class EwtrController extends Controller
 
         $pythonBinary = $this->getPythonBinary();
         
-        // On Windows and cross-platform, double-quote paths cleanly so spaces and backslashes don't corrupt
-        $cmd = '"' . $pythonBinary . '" "' . $scriptPath . '" --input "' . $sourcePath . '" --output "' . $outputPath . '" --text-file "' . $tempTextFile . '"';
+        $escapedBin = escapeshellarg($pythonBinary);
+        $escapedScript = escapeshellarg($scriptPath);
+        $escapedSource = escapeshellarg($sourcePath);
+        $escapedOutput = escapeshellarg($outputPath);
+        $escapedTextFile = escapeshellarg($tempTextFile);
 
-        exec($cmd . ' 2>&1', $output, $returnCode);
+        $cmd = "{$escapedBin} {$escapedScript} --input {$escapedSource} --output {$escapedOutput} --text-file {$escapedTextFile} 2>&1";
+
+        exec($cmd, $output, $returnCode);
 
         if (file_exists($tempTextFile)) {
             @unlink($tempTextFile);
         }
 
-        if ($returnCode !== 0) {
-            \Log::warning('Failed to stamp EWTR PDF with python script: ' . implode("\n", $output));
+        if ($returnCode !== 0 || !file_exists($outputPath) || filesize($outputPath) === 0) {
+            \Log::error('Failed to stamp EWTR PDF with python script: ' . implode("\n", $output));
             if (!file_exists($outputPath) && $sourcePath !== $outputPath) {
                 copy($sourcePath, $outputPath);
             }
+            return false;
         }
+
+        return true;
     }
 
     public function toggleItemStatus(Request $request, $ewtrId, $itemId)

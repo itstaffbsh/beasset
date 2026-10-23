@@ -2,7 +2,26 @@ import argparse
 import os
 import sys
 from io import BytesIO
-import pypdf
+
+# Auto install pypdf & reportlab if missing
+try:
+    import pypdf
+    import reportlab
+except ImportError:
+    import subprocess
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "pypdf", "reportlab", "--break-system-packages", "--quiet", "--no-warn-script-location"])
+        import pypdf
+        import reportlab
+    except Exception:
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "pypdf", "reportlab", "--quiet", "--no-warn-script-location"])
+            import pypdf
+            import reportlab
+        except Exception as e:
+            sys.stderr.write(f"ERROR: Missing pypdf or reportlab, could not auto-install: {e}\n")
+            sys.exit(1)
+
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Frame, Paragraph
