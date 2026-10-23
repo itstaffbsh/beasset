@@ -47,15 +47,23 @@ class BorrowStatusController extends Controller
 
         $history = ProductHistory::findOrFail($id);
 
-        if ($request->hasFile('scanned_pdf')) {
-            // Delete old file if exists
-            if ($history->scanned_pdf && Storage::disk('public')->exists($history->scanned_pdf)) {
-                Storage::disk('public')->delete($history->scanned_pdf);
-            }
+        try {
+            if ($request->hasFile('scanned_pdf')) {
+                // Delete old file if exists
+                if ($history->scanned_pdf && Storage::disk('public')->exists($history->scanned_pdf)) {
+                    Storage::disk('public')->delete($history->scanned_pdf);
+                }
 
-            $path = $request->file('scanned_pdf')->store('scanned_pdfs', 'public');
-            $history->scanned_pdf = $path;
-            $history->save();
+                $path = $request->file('scanned_pdf')->store('scanned_pdfs', 'public');
+                $history->scanned_pdf = $path;
+                $history->save();
+            }
+        } catch (\Exception $e) {
+            $msg = $e->getMessage();
+            if (str_contains($msg, 'Permission denied') || str_contains($msg, 'mkdir()')) {
+                $msg .= '. Server VPS tidak memiliki izin tulis pada folder storage. Jalankan: sudo chown -R www-data:www-data storage bootstrap/cache && sudo chmod -R 775 storage bootstrap/cache';
+            }
+            return response()->json(['success' => false, 'message' => 'Gagal upload: ' . $msg], 422);
         }
 
         return response()->json([

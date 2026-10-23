@@ -95,8 +95,16 @@ class AsetController extends Controller
             }
         }
 
-        Excel::import(new ProductsImport($holderMappings), $request->file('file'));
-        return response()->json(['message' => 'Data aset berhasil diimport.']);
+        try {
+            Excel::import(new ProductsImport($holderMappings), $request->file('file'));
+            return response()->json(['message' => 'Data aset berhasil diimport.']);
+        } catch (\Exception $e) {
+            $errorMsg = $e->getMessage();
+            if (str_contains($errorMsg, 'Permission denied') || str_contains($errorMsg, 'mkdir()')) {
+                $errorMsg .= '. Server VPS tidak memiliki izin tulis pada folder storage. Jalankan di terminal VPS: sudo chown -R www-data:www-data storage bootstrap/cache && sudo chmod -R 775 storage bootstrap/cache';
+            }
+            return response()->json(['message' => 'Gagal mengimpor file: ' . $errorMsg], 422);
+        }
     }
 
     private function checkHolders($file)

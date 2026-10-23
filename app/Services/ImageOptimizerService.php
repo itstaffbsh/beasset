@@ -116,7 +116,11 @@ class ImageOptimizerService
         $targetDirectory = Storage::disk('public')->path(trim($directory, '/'));
 
         if (!file_exists($targetDirectory)) {
-            @mkdir($targetDirectory, 0755, true);
+            if (!@mkdir($targetDirectory, 0775, true) && !@mkdir($targetDirectory, 0777, true)) {
+                if (!file_exists($targetDirectory)) {
+                    throw new \RuntimeException("Direktori penyimpanan `storage/app/public/{$directory}` tidak dapat dibuat. Periksa izin permission folder storage di VPS (jalankan: sudo chown -R www-data:www-data storage && sudo chmod -R 775 storage).");
+                }
+            }
         }
 
         $fullTargetPath = Storage::disk('public')->path($relativePath);

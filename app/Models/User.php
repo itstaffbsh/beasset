@@ -4,16 +4,11 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
-use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-
-#[Fillable(['name', 'email', 'password', 'role', 'office_id', 'department_id', 'employee_id', 'job_position', 'job_level', 'join_date', 'phone_number'])]
-#[Hidden(['password', 'remember_token'])]
 /* |--------------------------------------------------------------------------
    | [MODEL USER / KARYAWAN]
    |--------------------------------------------------------------------------
@@ -30,6 +25,7 @@ class User extends Authenticatable
         'personal_email',
         'password',
         'role',
+        'status',
         'office_id',
         'department_id',
         'job_position',

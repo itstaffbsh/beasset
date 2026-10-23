@@ -343,7 +343,11 @@ class UserController extends Controller
                 'message' => $msg
             ]);
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Gagal mengimpor file: ' . $e->getMessage()], 422);
+            $errorMsg = $e->getMessage();
+            if (str_contains($errorMsg, 'Permission denied') || str_contains($errorMsg, 'mkdir()')) {
+                $errorMsg .= '. Server VPS tidak memiliki izin tulis pada folder storage. Jalankan di terminal VPS: sudo chown -R www-data:www-data storage bootstrap/cache && sudo chmod -R 775 storage bootstrap/cache';
+            }
+            return response()->json(['message' => 'Gagal mengimpor file: ' . $errorMsg], 422);
         }
     }
 }
