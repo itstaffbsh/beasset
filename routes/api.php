@@ -92,6 +92,3 @@ Route::middleware('auth:sanctum')->group(function () {
 
 // Publik Scan API
 Route::get('/scan/{token}', [ScanController::class, 'apiShow']);
-
-// Publik Storage API
-Route::match(['GET', 'HEAD', 'OPTIONS'], '/storage/{path}', [\App\Http\Controllers\PublicStorageController::class, 'show'])->where('path', '.*');

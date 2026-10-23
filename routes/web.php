@@ -1,7 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\PublicStorageController;
+use Illuminate\Support\Facades\Storage;
 
 /*
 |--------------------------------------------------------------------------
@@ -22,9 +22,26 @@ Route::get('/', function () {
 });
 
 // Endpoint untuk menyajikan file publik storage (PDF, EWTR, Avatar, Scan, dll)
-Route::match(['GET', 'HEAD', 'OPTIONS'], '/storage/{path}', [PublicStorageController::class, 'show'])
-    ->where('path', '.*')
-    ->name('public.storage');
+Route::get('/storage/{path}', function (\Illuminate\Http\Request $request, string $path) {
+    $disk = Storage::disk('public');
+    
+    if (!$disk->exists($path)) {
+        return response()->json([
+            'status'  => 'error',
+            'message' => 'File tidak ditemukan di storage server.'
+        ], 404);
+    }
+
+    $mime = $disk->mimeType($path) ?: 'application/octet-stream';
+    $filename = basename($path);
+    $disposition = $request->has('download') ? 'attachment' : 'inline';
+
+    return $disk->response($path, $filename, [
+        'Content-Type'        => $mime,
+        'Content-Disposition' => $disposition . '; filename="' . $filename . '"',
+        'Access-Control-Allow-Origin' => '*',
+    ]);
+})->where('path', '.*')->name('public.storage');
 
 // Fallback untuk setiap permintaan web yang tidak terdaftar
 Route::fallback(function () {
