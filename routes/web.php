@@ -63,10 +63,16 @@ Route::get('/tambah-kolom-karyawan', function() {
     $results = [];
 
     $columns = [
-        'job_position' => "ALTER TABLE `users` ADD COLUMN `job_position` VARCHAR(255) NULL AFTER `role`",
-        'job_level'    => "ALTER TABLE `users` ADD COLUMN `job_level` VARCHAR(255) NULL AFTER `job_position`",
-        'join_date'    => "ALTER TABLE `users` ADD COLUMN `join_date` DATE NULL AFTER `job_level`",
-        'phone_number' => "ALTER TABLE `users` ADD COLUMN `phone_number` VARCHAR(20) NULL AFTER `join_date`",
+        'email_bsh'      => "ALTER TABLE `users` ADD COLUMN `email_bsh` VARCHAR(255) NULL AFTER `email`",
+        'personal_email' => "ALTER TABLE `users` ADD COLUMN `personal_email` VARCHAR(255) NULL AFTER `email_bsh`",
+        'status'         => "ALTER TABLE `users` ADD COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'active' AFTER `role`",
+        'job_position'   => "ALTER TABLE `users` ADD COLUMN `job_position` VARCHAR(255) NULL AFTER `role`",
+        'job_level'      => "ALTER TABLE `users` ADD COLUMN `job_level` VARCHAR(255) NULL AFTER `job_position`",
+        'join_date'      => "ALTER TABLE `users` ADD COLUMN `join_date` DATE NULL AFTER `job_level`",
+        'phone_number'   => "ALTER TABLE `users` ADD COLUMN `phone_number` VARCHAR(30) NULL AFTER `join_date`",
+        'avatar'         => "ALTER TABLE `users` ADD COLUMN `avatar` VARCHAR(255) NULL AFTER `phone_number`",
+        'phone'          => "ALTER TABLE `users` ADD COLUMN `phone` VARCHAR(30) NULL AFTER `avatar`",
+        'address'        => "ALTER TABLE `users` ADD COLUMN `address` TEXT NULL AFTER `phone`",
     ];
 
     foreach ($columns as $col => $sql) {

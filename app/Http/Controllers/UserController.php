@@ -82,12 +82,10 @@ class UserController extends Controller
             $avatarPath = ImageOptimizerService::convertToWebp($request->file('avatar'), 'users', 80, 1200);
         }
 
-        $user = User::create([
+        $userData = [
             'employee_id'    => $request->employee_id,
             'name'           => $request->name,
             'email'          => $request->email,
-            'email_bsh'      => $request->email_bsh,
-            'personal_email' => $request->personal_email,
             'password'       => $request->password ? bcrypt($request->password) : null,
             'role'           => $request->role,
             'office_id'      => $request->office_id,
@@ -99,7 +97,16 @@ class UserController extends Controller
             'phone'          => $request->phone ?? $request->phone_number,
             'address'        => $request->address,
             'avatar'         => $avatarPath,
-        ]);
+        ];
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'email_bsh')) {
+            $userData['email_bsh'] = $request->email_bsh;
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'personal_email')) {
+            $userData['personal_email'] = $request->personal_email;
+        }
+
+        $user = User::create($userData);
 
         return response()->json(['message' => 'Akun karyawan berhasil dibuat.', 'data' => $user], 201);
     }
@@ -134,8 +141,6 @@ class UserController extends Controller
             'employee_id'    => $request->employee_id,
             'name'           => $request->name,
             'email'          => $request->email,
-            'email_bsh'      => $request->email_bsh,
-            'personal_email' => $request->personal_email,
             'role'           => $request->role,
             'office_id'      => $request->office_id,
             'department_id'  => $request->department_id,
@@ -146,6 +151,13 @@ class UserController extends Controller
             'phone'          => $request->phone ?? $request->phone_number,
             'address'        => $request->address,
         ];
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'email_bsh')) {
+            $data['email_bsh'] = $request->email_bsh;
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'personal_email')) {
+            $data['personal_email'] = $request->personal_email;
+        }
 
         if ($request->hasFile('avatar')) {
             if ($user->avatar && Storage::disk('public')->exists($user->avatar)) {
@@ -293,10 +305,14 @@ class UserController extends Controller
                     }
 
                     // Cek apakah ada di database
-                    $existing = User::where('email', $primaryEmail)
-                        ->orWhere('email_bsh', $primaryEmail)
-                        ->orWhere('personal_email', $primaryEmail)
-                        ->first();
+                    $existingQuery = User::where('email', $primaryEmail);
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'email_bsh')) {
+                        $existingQuery->orWhere('email_bsh', $primaryEmail);
+                    }
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'personal_email')) {
+                        $existingQuery->orWhere('personal_email', $primaryEmail);
+                    }
+                    $existing = $existingQuery->first();
 
                     // Juga cek jika ada duplikat dalam file itu sendiri
                     $inCurrentFile = in_array(strtolower($primaryEmail), $seenEmails);

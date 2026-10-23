@@ -93,8 +93,6 @@ class UsersImport implements ToModel, WithHeadingRow
             'employee_id'    => !empty($empId) ? $empId : null,
             'name'           => !empty($name) ? $name : ($empId ?: 'Karyawan BSH'),
             'email'          => $primaryEmail,
-            'email_bsh'      => !empty($emailBsh) ? $emailBsh : null,
-            'personal_email' => !empty($personalEmail) ? $personalEmail : null,
             'role'           => strtolower($row['role'] ?? 'user'),
             'job_position'   => !empty($jobPos) ? $jobPos : null,
             'job_level'      => !empty($jobLvl) ? $jobLvl : null,
@@ -106,6 +104,13 @@ class UsersImport implements ToModel, WithHeadingRow
             'department_id'  => $deptId,
         ];
 
+        if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'email_bsh')) {
+            $userData['email_bsh'] = !empty($emailBsh) ? $emailBsh : null;
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'personal_email')) {
+            $userData['personal_email'] = !empty($personalEmail) ? $personalEmail : null;
+        }
+
         if (!empty($photo)) {
             $userData['avatar'] = $photo;
         }
@@ -113,10 +118,14 @@ class UsersImport implements ToModel, WithHeadingRow
         // 1. Cari user yang sudah ada berdasarkan email utama terlebih dahulu (karena email bersifat unique)
         $user = null;
         if (!empty($primaryEmail)) {
-            $user = User::where('email', $primaryEmail)
-                ->orWhere('email_bsh', $primaryEmail)
-                ->orWhere('personal_email', $primaryEmail)
-                ->first();
+            $userQuery = User::where('email', $primaryEmail);
+            if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'email_bsh')) {
+                $userQuery->orWhere('email_bsh', $primaryEmail);
+            }
+            if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'personal_email')) {
+                $userQuery->orWhere('personal_email', $primaryEmail);
+            }
+            $user = $userQuery->first();
         }
 
         // 2. Jika tidak ditemukan lewat email, coba cari berdasarkan employee_id jika diisi
@@ -144,7 +153,9 @@ class UsersImport implements ToModel, WithHeadingRow
                 }
 
                 $userData['email'] = $uniqueEmail;
-                $userData['email_bsh'] = $uniqueEmail;
+                if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'email_bsh')) {
+                    $userData['email_bsh'] = $uniqueEmail;
+                }
                 $userData['password'] = Hash::make('password123');
                 User::create($userData);
                 return null;

@@ -152,20 +152,25 @@ class ProductsImport implements ToModel, WithHeadingRow
             $ignored = ['-', 'kosong', 'hilang', 'stock', 'stok', 'di kantor', 'dikantor', 'kantor', 'rusak', 'tersedia', 'null', 'none'];
             if (!empty($holderName) && !in_array($clean, $ignored)) {
                 $candidateEmail = Str::slug($holderName, '.') . '@balibsh.com';
-                $targetUser = User::where('name', 'like', $holderName)
-                    ->orWhere('email', $candidateEmail)
-                    ->orWhere('email_bsh', $candidateEmail)
-                    ->first();
+                $targetUserQuery = User::where('name', 'like', $holderName)
+                    ->orWhere('email', $candidateEmail);
+                if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'email_bsh')) {
+                    $targetUserQuery->orWhere('email_bsh', $candidateEmail);
+                }
+                $targetUser = $targetUserQuery->first();
 
                 if (!$targetUser) {
-                    $targetUser = User::create([
+                    $newUserData = [
                         'name'          => $holderName,
                         'email'         => $candidateEmail,
-                        'email_bsh'     => $candidateEmail,
                         'role'          => 'user',
                         'office_id'     => 1,
                         'department_id' => $department->id,
-                    ]);
+                    ];
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'email_bsh')) {
+                        $newUserData['email_bsh'] = $candidateEmail;
+                    }
+                    $targetUser = User::create($newUserData);
                 }
             }
         }
