@@ -26,12 +26,7 @@ class DepartmentController extends Controller
             $query->orderBy('created_at', 'desc');
         }
 
-        if ($request->wantsJson() || $request->is('api/*')) {
-            return response()->json($query->paginate($perPage));
-        }
-        
-        $departments = $query->get();
-        return view('departments.index', compact('departments'));
+        return response()->json($query->paginate($perPage));
     }
 
     public function store(Request $request)

@@ -45,15 +45,7 @@ class UserController extends Controller
             $query->orderBy('created_at', 'desc');
         }
 
-        if ($request->wantsJson() || $request->is('api/*')) {
-            return response()->json($query->paginate($perPage));
-        }
-
-        $users = $query->get();
-        $departments = \App\Models\Department::all();
-        $offices = \App\Models\Office::all();
-
-        return view('users.index', compact('users', 'departments', 'offices', 'searchTerm', 'filterDept', 'filterKantor', 'filterStatus'));
+        return response()->json($query->paginate($perPage));
     }
 
     public function store(Request $request)
@@ -265,6 +257,9 @@ class UserController extends Controller
 
     public function import(Request $request)
     {
+        @set_time_limit(300);
+        @ini_set('memory_limit', '1024M');
+
         $request->validate([
             'file' => 'required|file|mimes:xlsx,xls,csv,txt',
             'duplicate_action' => 'nullable|string|in:use_existing,create_new,cancel,check',
@@ -286,6 +281,25 @@ class UserController extends Controller
                 $sheets = \Maatwebsite\Excel\Facades\Excel::toArray(new \App\Imports\UsersCheckImport, $request->file('file'));
                 $rows = $sheets[0] ?? [];
 
+                // Preload user data ke dalam memory hash-map untuk pengecekan instan (O(1))
+                $existingUsers = User::select('id', 'name', 'email', 'email_bsh', 'personal_email', 'employee_id')->get();
+                $existingEmails = [];
+                $existingEmpIds = [];
+                foreach ($existingUsers as $u) {
+                    if ($u->email) {
+                        $existingEmails[strtolower(trim($u->email))] = $u;
+                    }
+                    if ($u->email_bsh) {
+                        $existingEmails[strtolower(trim($u->email_bsh))] = $u;
+                    }
+                    if ($u->personal_email) {
+                        $existingEmails[strtolower(trim($u->personal_email))] = $u;
+                    }
+                    if ($u->employee_id) {
+                        $existingEmpIds[trim($u->employee_id)] = $u;
+                    }
+                }
+
                 $duplicates = [];
                 $seenEmails = [];
 
@@ -304,19 +318,14 @@ class UserController extends Controller
                         $primaryEmail = \Illuminate\Support\Str::slug($empId ?: $name ?: uniqid(), '.') . '@balibsh.com';
                     }
 
-                    // Cek apakah ada di database
-                    $existingQuery = User::where('email', $primaryEmail);
-                    if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'email_bsh')) {
-                        $existingQuery->orWhere('email_bsh', $primaryEmail);
-                    }
-                    if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'personal_email')) {
-                        $existingQuery->orWhere('personal_email', $primaryEmail);
-                    }
-                    $existing = $existingQuery->first();
+                    $lowerPrimary = strtolower($primaryEmail);
+
+                    // Cek apakah ada di database lewat email atau employee_id
+                    $existing = $existingEmails[$lowerPrimary] ?? ($empId && isset($existingEmpIds[$empId]) ? $existingEmpIds[$empId] : null);
 
                     // Juga cek jika ada duplikat dalam file itu sendiri
-                    $inCurrentFile = in_array(strtolower($primaryEmail), $seenEmails);
-                    $seenEmails[] = strtolower($primaryEmail);
+                    $inCurrentFile = in_array($lowerPrimary, $seenEmails);
+                    $seenEmails[] = $lowerPrimary;
 
                     if ($existing || $inCurrentFile) {
                         $duplicates[] = [
@@ -340,7 +349,8 @@ class UserController extends Controller
                     ], 200);
                 }
             } catch (\Exception $e) {
-                // Abaikan error pada pengecekan awal dan biarkan lanjut ke import
+                \Illuminate\Support\Facades\Log::warning('User import pre-check warning: ' . $e->getMessage());
+                // Lanjut ke import jika check gagal
             }
         }
 
@@ -348,17 +358,26 @@ class UserController extends Controller
         $action = in_array($duplicateAction, ['use_existing', 'create_new']) ? $duplicateAction : 'use_existing';
 
         try {
-            \Maatwebsite\Excel\Facades\Excel::import(new \App\Imports\UsersImport($action), $request->file('file'));
+            $importInstance = new \App\Imports\UsersImport($action);
+            \Maatwebsite\Excel\Facades\Excel::import($importInstance, $request->file('file'));
 
-            $msg = $action === 'create_new'
-                ? 'Data karyawan berhasil diimpor (user duplikat ditambahkan sebagai user baru).'
-                : 'Data karyawan berhasil diimpor (menggunakan & memperbarui data user yang ada).';
+            if ($action === 'create_new') {
+                $msg = "Data karyawan berhasil diimpor ({$importInstance->importedCount} user ditambahkan sebagai user baru).";
+            } else {
+                $msg = "Data karyawan berhasil diproses ({$importInstance->updatedCount} user diperbarui, {$importInstance->importedCount} user baru ditambahkan).";
+            }
 
             return response()->json([
                 'status' => 'success',
-                'message' => $msg
+                'message' => $msg,
+                'imported_count' => $importInstance->importedCount,
+                'updated_count' => $importInstance->updatedCount,
             ]);
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Gagal mengimpor file karyawan: ' . $e->getMessage(), [
+                'exception' => $e
+            ]);
+
             $errorMsg = $e->getMessage();
             if (str_contains($errorMsg, 'Permission denied') || str_contains($errorMsg, 'mkdir()')) {
                 $errorMsg .= '. Server VPS tidak memiliki izin tulis pada folder storage. Jalankan di terminal VPS: sudo chown -R www-data:www-data storage bootstrap/cache && sudo chmod -R 775 storage bootstrap/cache';

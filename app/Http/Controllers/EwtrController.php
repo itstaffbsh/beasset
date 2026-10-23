@@ -286,6 +286,28 @@ class EwtrController extends Controller
     }
 
     /**
+     * Resolve working python binary executable (Windows & Linux compatible)
+     */
+    protected function getPythonBinary(): string
+    {
+        $candidates = [
+            'C:\\Python314\\python.exe',
+            'C:\\Python313\\python.exe',
+            'C:\\Python312\\python.exe',
+            'C:\\Python311\\python.exe',
+            'C:\\Python310\\python.exe',
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (file_exists($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return 'python';
+    }
+
+    /**
      * Stamp keterangan onto EWTR PDF inside Review & Comments box in IT APPROVAL SECTION
      */
     protected function stampPdfWithKeterangan(string $sourcePath, string $outputPath, ?string $keterangan): void
@@ -302,12 +324,10 @@ class EwtrController extends Controller
         $tempTextFile = tempnam(sys_get_temp_dir(), 'ewtr_keterangan_');
         file_put_contents($tempTextFile, $keterangan);
 
-        $pythonBinary = 'python';
-        $cmd = escapeshellcmd($pythonBinary) . ' ' .
-            escapeshellarg($scriptPath) . ' --input ' .
-            escapeshellarg($sourcePath) . ' --output ' .
-            escapeshellarg($outputPath) . ' --text-file ' .
-            escapeshellarg($tempTextFile);
+        $pythonBinary = $this->getPythonBinary();
+        
+        // On Windows and cross-platform, double-quote paths cleanly so spaces and backslashes don't corrupt
+        $cmd = '"' . $pythonBinary . '" "' . $scriptPath . '" --input "' . $sourcePath . '" --output "' . $outputPath . '" --text-file "' . $tempTextFile . '"';
 
         exec($cmd . ' 2>&1', $output, $returnCode);
 

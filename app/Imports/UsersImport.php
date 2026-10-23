@@ -5,24 +5,89 @@ namespace App\Imports;
 use App\Models\User;
 use App\Models\Office;
 use App\Models\Department;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
-use Maatwebsite\Excel\Concerns\ToModel;
+use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 
-class UsersImport implements ToModel, WithHeadingRow
+class UsersImport implements ToCollection, WithHeadingRow
 {
-    protected string $duplicateAction; // 'use_existing', 'create_new', 'cancel'
+    public string $duplicateAction; // 'use_existing', 'create_new', 'cancel'
+    public int $importedCount = 0;
+    public int $updatedCount = 0;
+
+    protected array $offices = [];
+    protected array $departments = [];
+    protected ?string $defaultOfficeId = null;
+    protected array $emailMap = [];
+    protected array $empIdMap = [];
+    protected string $defaultPassword;
+    protected int $nextEmpNum;
 
     public function __construct(string $duplicateAction = 'use_existing')
     {
         $this->duplicateAction = $duplicateAction;
+        $this->initializeCache();
     }
 
-    public function model(array $row)
+    /**
+     * Preload dan cache data yang dibutuhkan ke dalam memory
+     * untuk menghindari ribuan query individual ke database saat memproses baris Excel.
+     */
+    protected function initializeCache(): void
     {
-        // Bersihkan dan ambil kolom sesuai format:
-        // No, Full Name, Email BSH, Email, Organization, Job Position, Job Level, Join Date, Nomor HP, Area
+        // Pre-compute bcrypt password satu kali untuk menghemat beban CPU loop
+        $this->defaultPassword = Hash::make('password123');
+
+        $defaultOffice = Office::first();
+        $this->defaultOfficeId = $defaultOffice ? $defaultOffice->id : null;
+
+        // Cache offices
+        foreach (Office::all() as $office) {
+            $this->offices[strtolower(trim($office->nama_kantor))] = $office->id;
+        }
+
+        // Cache departments
+        foreach (Department::all() as $dept) {
+            $this->departments[strtolower(trim($dept->nama_departemen))] = $dept->id;
+        }
+
+        // Cache users yang sudah ada
+        $users = User::all();
+        foreach ($users as $u) {
+            if ($u->email) {
+                $this->emailMap[strtolower(trim($u->email))] = $u;
+            }
+            if ($u->email_bsh) {
+                $this->emailMap[strtolower(trim($u->email_bsh))] = $u;
+            }
+            if ($u->personal_email) {
+                $this->emailMap[strtolower(trim($u->personal_email))] = $u;
+            }
+            if ($u->employee_id) {
+                $this->empIdMap[trim($u->employee_id)] = $u;
+            }
+        }
+
+        // Hitung ID karyawan numerik tertinggi berikutnya
+        $maxNum = User::whereRaw("employee_id REGEXP '^[0-9]+$'")->max(DB::raw('CAST(employee_id AS UNSIGNED)'));
+        $this->nextEmpNum = $maxNum ? (int)$maxNum + 1 : 1;
+    }
+
+    public function collection(Collection $rows)
+    {
+        DB::transaction(function () use ($rows) {
+            foreach ($rows as $row) {
+                $this->processRow($row->toArray());
+            }
+        });
+    }
+
+    protected function processRow(array $row): void
+    {
+        // Bersihkan dan ambil kolom sesuai format
         $empId = isset($row['no']) ? trim((string)$row['no']) : (isset($row['employee_id']) ? trim((string)$row['employee_id']) : null);
         $name = trim($row['full_name'] ?? $row['name'] ?? $row['nama_lengkap'] ?? $row['nama'] ?? '');
         $emailBsh = trim($row['email_bsh'] ?? $row['email_kantor'] ?? '');
@@ -38,23 +103,39 @@ class UsersImport implements ToModel, WithHeadingRow
 
         // Abaikan baris kosong tanpa nama dan tanpa email
         if (empty($name) && empty($emailBsh) && empty($personalEmail) && empty($empId)) {
-            return null;
+            return;
         }
 
         // Tentukan email utama untuk login
         $primaryEmail = !empty($emailBsh) ? $emailBsh : (!empty($personalEmail) ? $personalEmail : null);
-
-        // Jika tidak ada email sama sekali, buatkan email otomatis berbasis employee_id atau nama
         if (empty($primaryEmail)) {
             $slug = Str::slug($empId ?: $name ?: uniqid(), '.');
             $primaryEmail = $slug . '@balibsh.com';
         }
 
+        // Cari atau buat Kantor / Area jika diisi
+        $officeId = null;
+        if (!empty($areaName)) {
+            $lowerArea = strtolower($areaName);
+            if (isset($this->offices[$lowerArea])) {
+                $officeId = $this->offices[$lowerArea];
+            } else {
+                $office = Office::create(['nama_kantor' => $areaName]);
+                $this->offices[$lowerArea] = $office->id;
+                $officeId = $office->id;
+            }
+        }
+        if (!$officeId) {
+            $officeId = $this->defaultOfficeId;
+        }
+
         // Cari atau buat Organisasi / Departemen jika diisi
         $deptId = null;
         if (!empty($orgName)) {
-            $dept = Department::where('nama_departemen', 'like', $orgName)->first();
-            if (!$dept) {
+            $lowerDept = strtolower($orgName);
+            if (isset($this->departments[$lowerDept])) {
+                $deptId = $this->departments[$lowerDept];
+            } else {
                 $words = explode(' ', $orgName);
                 $code = '';
                 foreach ($words as $w) {
@@ -67,22 +148,9 @@ class UsersImport implements ToModel, WithHeadingRow
                     'nama_departemen' => $orgName,
                     'kode_asset'      => $code ?: 'DEP',
                 ]);
+                $this->departments[$lowerDept] = $dept->id;
+                $deptId = $dept->id;
             }
-            $deptId = $dept->id;
-        }
-
-        // Cari atau buat Kantor / Area jika diisi
-        $officeId = null;
-        if (!empty($areaName)) {
-            $office = Office::where('nama_kantor', 'like', $areaName)->first();
-            if (!$office) {
-                $office = Office::create(['nama_kantor' => $areaName]);
-            }
-            $officeId = $office->id;
-        }
-        if (!$officeId) {
-            $defaultOffice = Office::first();
-            $officeId = $defaultOffice ? $defaultOffice->id : 1;
         }
 
         // Format tanggal bergabung
@@ -115,26 +183,11 @@ class UsersImport implements ToModel, WithHeadingRow
             $userData['avatar'] = $photo;
         }
 
-        // 1. Cari user yang sudah ada berdasarkan email utama terlebih dahulu (karena email bersifat unique)
-        $user = null;
-        if (!empty($primaryEmail)) {
-            $userQuery = User::where('email', $primaryEmail);
-            if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'email_bsh')) {
-                $userQuery->orWhere('email_bsh', $primaryEmail);
-            }
-            if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'personal_email')) {
-                $userQuery->orWhere('personal_email', $primaryEmail);
-            }
-            $user = $userQuery->first();
-        }
+        // Cari user yang sudah ada berdasarkan email utama atau employee_id
+        $lowerEmail = strtolower($primaryEmail);
+        $existingUser = $this->emailMap[$lowerEmail] ?? ($empId && isset($this->empIdMap[$empId]) ? $this->empIdMap[$empId] : null);
 
-        // 2. Jika tidak ditemukan lewat email, coba cari berdasarkan employee_id jika diisi
-        if (!$user && !empty($empId)) {
-            $user = User::where('employee_id', $empId)->first();
-        }
-
-        // 3. Penanganan Duplikat Berdasarkan duplicateAction
-        if ($user) {
+        if ($existingUser) {
             if ($this->duplicateAction === 'cancel') {
                 throw new \Exception("Import dibatalkan karena terdapat user yang sudah ada: {$name} ({$primaryEmail}).");
             }
@@ -147,36 +200,65 @@ class UsersImport implements ToModel, WithHeadingRow
                 $local = $parts[0];
                 $domain = $parts[1] ?? 'balibsh.com';
                 $counter = 1;
-                while (User::where('email', $uniqueEmail)->exists()) {
+                while (isset($this->emailMap[strtolower($uniqueEmail)])) {
                     $uniqueEmail = "{$local}.new{$counter}@{$domain}";
                     $counter++;
                 }
 
                 $userData['email'] = $uniqueEmail;
-                if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'email_bsh')) {
+                if (!empty($userData['email_bsh'])) {
                     $userData['email_bsh'] = $uniqueEmail;
                 }
-                $userData['password'] = Hash::make('password123');
-                User::create($userData);
-                return null;
+
+                // Pastikan employee_id unik juga
+                if (!empty($userData['employee_id']) && isset($this->empIdMap[$userData['employee_id']])) {
+                    $userData['employee_id'] = str_pad($this->nextEmpNum++, 5, '0', STR_PAD_LEFT);
+                } elseif (empty($userData['employee_id'])) {
+                    $userData['employee_id'] = str_pad($this->nextEmpNum++, 5, '0', STR_PAD_LEFT);
+                }
+
+                $userData['password'] = $this->defaultPassword;
+                $newUser = User::create($userData);
+
+                $this->emailMap[strtolower($userData['email'])] = $newUser;
+                if (!empty($userData['employee_id'])) {
+                    $this->empIdMap[$userData['employee_id']] = $newUser;
+                }
+                $this->importedCount++;
+                return;
             }
 
-            // Default: 'use_existing' (Gunakan & perbarui data yang ada)
-            // Pastikan tidak mengubah email ke email user lain yang sudah dipakai
-            if ($user->email !== $primaryEmail) {
-                $otherUser = User::where('email', $primaryEmail)->where('id', '!=', $user->id)->first();
-                if ($otherUser) {
-                    $userData['email'] = $user->email; // Pertahankan email yang sudah aman
+            // Default 'use_existing': Update user yang sudah ada
+            if ($existingUser->email !== $primaryEmail) {
+                // Cek apakah email baru sudah dipakai oleh user lain di database
+                if (isset($this->emailMap[$lowerEmail]) && $this->emailMap[$lowerEmail]->id !== $existingUser->id) {
+                    $userData['email'] = $existingUser->email; // Pertahankan email yang sudah ada
                 }
             }
-            $user->update($userData);
-            return null;
+
+            $existingUser->update($userData);
+
+            $this->emailMap[strtolower($existingUser->email)] = $existingUser;
+            if (!empty($existingUser->employee_id)) {
+                $this->empIdMap[$existingUser->employee_id] = $existingUser;
+            }
+            $this->updatedCount++;
+            return;
         }
 
-        // 4. Jika user benar-benar baru
-        $userData['password'] = Hash::make('password123');
-        User::create($userData);
-        return null;
+        // User baru
+        if (empty($userData['employee_id'])) {
+            $userData['employee_id'] = str_pad($this->nextEmpNum++, 5, '0', STR_PAD_LEFT);
+        }
+
+        $userData['password'] = $this->defaultPassword;
+        $newUser = User::create($userData);
+
+        $this->emailMap[strtolower($userData['email'])] = $newUser;
+        if (!empty($userData['employee_id'])) {
+            $this->empIdMap[$userData['employee_id']] = $newUser;
+        }
+        $this->importedCount++;
     }
 
     /**

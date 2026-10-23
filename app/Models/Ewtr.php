@@ -38,7 +38,8 @@ class Ewtr extends Model
     public function getPdfUrlAttribute()
     {
         if (!$this->pdf_path) return null;
-        return asset('storage/' . $this->pdf_path);
+        $cleanPath = ltrim(preg_replace('/^\/?storage\/?/', '', $this->pdf_path), '/');
+        return url('storage/' . $cleanPath);
     }
 
     public function getTotalItemsCountAttribute()

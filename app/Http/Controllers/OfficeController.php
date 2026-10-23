@@ -26,12 +26,7 @@ class OfficeController extends Controller
             $query->orderBy('created_at', 'desc');
         }
 
-        if ($request->wantsJson() || $request->is('api/*')) {
-            return response()->json($query->paginate($perPage));
-        }
-        
-        $offices = $query->get();
-        return view('offices.index', compact('offices'));
+        return response()->json($query->paginate($perPage));
     }
 
     public function store(Request $request)

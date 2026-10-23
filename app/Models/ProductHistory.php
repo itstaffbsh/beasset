@@ -37,7 +37,18 @@ class ProductHistory extends Model
         'tanggal_pinjam',   // Tanggal resmi peminjaman di STTB
         'catatan',
         'accessories',
+        'scanned_pdf',
     ];
+
+    protected $appends = [
+        'scanned_pdf_url',
+    ];
+
+    public function getScannedPdfUrlAttribute()
+    {
+        if (!$this->scanned_pdf) return null;
+        return url('storage/' . ltrim($this->scanned_pdf, '/'));
+    }
 
     /* | [FUNGSI] | Relasi ke Aset yang sedang ditransaksikan */
     public function product()

@@ -25,12 +25,7 @@ class ClassificationController extends Controller
             $query->orderBy('created_at', 'desc');
         }
 
-        if ($request->wantsJson() || $request->is('api/*')) {
-            return response()->json($query->paginate($perPage));
-        }
-        
-        $classifications = $query->get();
-        return view('classifications.index', compact('classifications'));
+        return response()->json($query->paginate($perPage));
     }
 
     public function store(Request $request)
